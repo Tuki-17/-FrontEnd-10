@@ -1,4 +1,5 @@
 import React from 'react';
+import { API_URL } from '../services/api';
 
 // Mapa de imágenes de demostración por tipo de producto
 const PRODUCT_IMAGES = {
@@ -46,8 +47,17 @@ const ADVERTENCIAS = {
 export function ProductCard({ producto, onAddToCart }) {
   const key = getKey(producto.nombre);
   const badge = BADGE_CONFIG[key];
-  const imgSrc = PRODUCT_IMAGES[key];
-  const advertencia = ADVERTENCIAS[key];
+  let imgSrc = PRODUCT_IMAGES[key];
+  if (producto.imagen_url) {
+    const rawUrl = producto.imagen_url.trim();
+    if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://') || rawUrl.startsWith('//') || rawUrl.startsWith('data:')) {
+      imgSrc = rawUrl;
+    } else {
+      const cleanPath = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
+      imgSrc = `${API_URL}${cleanPath}`;
+    }
+  }
+  const advertencia = producto.descripcion || ADVERTENCIAS[key];
   const sinStock = producto.stock <= 0;
 
   return (

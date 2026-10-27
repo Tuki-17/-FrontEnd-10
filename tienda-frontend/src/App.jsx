@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { getProductos, solicitarArrepentimiento } from './services/api';
+import { getProductos, solicitarArrepentimiento, registerUser, checkout, loginUser, getMe } from './services/api';
 import { ProductCard } from './components/ProductCard';
+import { AdminPanel } from './components/AdminPanel';
+import toast, { Toaster } from 'react-hot-toast';
 
 export default function App() {
   const [productos, setProductos] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [lento, setLento] = useState(false);
 
   // Estados del Carrito
   const [cart, setCart] = useState([]);
@@ -14,8 +17,17 @@ export default function App() {
   // Estados de Compra (Checkout)
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [checkoutEmail, setCheckoutEmail] = useState('');
-  const [checkoutNombre, setCheckoutNombre] = useState('');
   const [compraExitosa, setCompraExitosa] = useState(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+
+  // Estados de Registro
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [regNombre, setRegNombre] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConsent, setRegConsent] = useState(false);
+  const [regError, setRegError] = useState(null);
+  const [regSuccess, setRegSuccess] = useState(null);
 
   // Estados de Arrepentimiento (Ley 24.240 - Res. 424/2020)
   const [isArrepentimientoOpen, setIsArrepentimientoOpen] = useState(false);
@@ -25,6 +37,35 @@ export default function App() {
   const [revocacionTicket, setRevocacionTicket] = useState(null);
   const [arrepError, setArrepError] = useState(null);
   const [arrepLoading, setArrepLoading] = useState(false);
+
+  // Estados de Autenticación
+  const [user, setUser] = useState(null);
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState(null);
+
+  useEffect(() => {
+    if (!loading) {
+      setLento(false);
+      return;
+    }
+    const t = setTimeout(() => setLento(true), 5000);
+    return () => clearTimeout(t);
+  }, [loading]);
+
+  // Cargar usuario inicial
+  useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      getMe(token)
+        .then(data => setUser(data))
+        .catch(() => {
+          localStorage.removeItem('access_token');
+        });
+    }
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -46,7 +87,7 @@ export default function App() {
     const itemExistente = cart.find((item) => item.id === producto.id);
     if (itemExistente) {
       if (itemExistente.cantidad >= producto.stock) {
-        alert(`No hay más stock disponible de ${producto.nombre}`);
+        toast.error(`No hay más stock disponible de ${producto.nombre}`);
         return;
       }
       setCart(
@@ -66,39 +107,65 @@ export default function App() {
     setCart(cart.filter((item) => item.id !== id));
   };
 
-  // Simular Checkout y Factura Legal
+  // Checkout Real con API
   const handleCheckoutSubmit = (e) => {
     e.preventDefault();
-    if (!checkoutEmail || !checkoutNombre) {
-      alert("Por favor completa todos los datos obligatorios.");
+    if (!checkoutEmail) {
+      toast.error("Por favor ingresá tu email registrado.");
       return;
     }
+    
+    setCheckoutLoading(true);
+    
+    const itemsData = cart.map(item => ({ id: item.id, cantidad: item.cantidad }));
+    
+    checkout(checkoutEmail, itemsData)
+      .then((data) => {
+         setCompraExitosa({
+           codigoCompra: data.codigo_compra,
+           fecha: new Date().toLocaleString('es-AR'),
+           email: checkoutEmail,
+           items: [...cart],
+           total: data.total,
+         });
+         setCart([]);
+         setIsCheckoutOpen(false);
+         // Opcional: Actualizar stock local sin recargar
+         const nuevosProductos = productos.map((p) => {
+           const itemEnCarrito = cart.find((c) => c.id === p.id);
+           if (itemEnCarrito) {
+             return { ...p, stock: Math.max(0, p.stock - itemEnCarrito.cantidad) };
+           }
+           return p;
+         });
+         setProductos(nuevosProductos);
+      })
+      .catch((err) => {
+         toast.error("Error en la compra: " + err.message);
+      })
+      .finally(() => {
+         setCheckoutLoading(false);
+      });
+  };
 
-    // Generar código de compra único
-    const codigoCompra = `CMP-${Math.floor(100000 + Math.random() * 900000)}`;
-    const fechaCompra = new Date().toLocaleString('es-AR');
-
-    // Descontar stock localmente para simulación
-    const nuevosProductos = productos.map((p) => {
-      const itemEnCarrito = cart.find((c) => c.id === p.id);
-      if (itemEnCarrito) {
-        return { ...p, stock: Math.max(0, p.stock - itemEnCarrito.cantidad) };
-      }
-      return p;
-    });
-    setProductos(nuevosProductos);
-
-    setCompraExitosa({
-      codigoCompra,
-      fecha: fechaCompra,
-      cliente: checkoutNombre,
-      email: checkoutEmail,
-      items: [...cart],
-      total: cart.reduce((sum, item) => sum + item.precio_final * item.cantidad, 0),
-    });
-
-    setCart([]); // Vaciar carrito
-    setIsCheckoutOpen(false);
+  const handleRegisterSubmit = (e) => {
+    e.preventDefault();
+    setRegError(null);
+    setRegSuccess(null);
+    
+    registerUser(regNombre, regEmail, regPassword, regConsent)
+      .then(() => {
+         setRegSuccess("¡Cuenta creada exitosamente! Ya podés realizar compras.");
+         setTimeout(() => {
+             setIsRegisterOpen(false);
+             setRegSuccess(null);
+             setRegNombre('');
+             setRegEmail('');
+             setRegPassword('');
+             setRegConsent(false);
+         }, 2500);
+      })
+      .catch((err) => setRegError(err.message));
   };
 
   // Enviar Revocación de Compra (Botón de Arrepentimiento)
@@ -134,13 +201,58 @@ export default function App() {
     setArrepCodigo('');
     setArrepDetalle('');
     setArrepError(null);
+    setIsLoginOpen(false);
+    setLoginError(null);
+  };
+
+  const handleLoginSubmit = (e) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError(null);
+    loginUser(loginEmail, loginPassword)
+      .then((data) => {
+        localStorage.setItem('access_token', data.access_token);
+        return getMe(data.access_token);
+      })
+      .then((userData) => {
+        setUser(userData);
+        setIsLoginOpen(false);
+        setLoginEmail('');
+        setLoginPassword('');
+        toast.success(`¡Bienvenido, ${userData.nombre}!`);
+      })
+      .catch((err) => {
+        setLoginError(err.message);
+      })
+      .finally(() => {
+        setLoginLoading(false);
+      });
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('access_token');
+    setUser(null);
+    setCart([]);
+    toast.success("Has cerrado sesión correctamente.");
+  };
+
+  const abrirRegistro = () => {
+    setIsRegisterOpen(true);
+    setRegError(null);
+    setRegSuccess(null);
   };
 
   const totalCarrito = cart.reduce((sum, item) => sum + item.precio_final * item.cantidad, 0);
 
   return (
     <div className="app-container">
-      
+      <Toaster position="bottom-right" toastOptions={{
+        style: {
+          borderRadius: '10px',
+          background: '#333',
+          color: '#fff',
+        },
+      }} />
       {/* Encabezado Principal */}
       <header className="app-header">
         <div className="brand-section">
@@ -148,6 +260,26 @@ export default function App() {
           <span className="brand-subtitle">Pastelería de ilusión óptica · Información transparente (Ley 24.240)</span>
         </div>
         <div className="nav-actions">
+          {!user ? (
+            <>
+              <button className="btn btn-secondary" onClick={() => setIsLoginOpen(true)}>
+                🔑 Iniciar Sesión
+              </button>
+              <button className="btn btn-secondary" onClick={abrirRegistro}>
+                👤 Registrarse
+              </button>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                Hola, {user.nombre} ({user.rol === 'admin' ? 'Administrador' : 'Cliente'})
+              </span>
+              <button className="btn btn-secondary" onClick={handleLogout}>
+                Cerrar Sesión
+              </button>
+            </>
+          )}
+          
           <button 
             className="btn btn-arrepentimiento" 
             onClick={() => setIsArrepentimientoOpen(true)}
@@ -156,14 +288,16 @@ export default function App() {
             ↩️ Arrepentimiento
           </button>
           
-          <button className="btn btn-secondary" onClick={() => setIsCartOpen(true)}>
-            🛒 Carrito
-            {cart.length > 0 && (
-              <span className="cart-badge">
-                {cart.reduce((s, i) => s + i.cantidad, 0)}
-              </span>
-            )}
-          </button>
+          {(!user || user.rol !== 'admin') && (
+            <button className="btn btn-secondary" onClick={() => setIsCartOpen(true)}>
+              🛒 Carrito
+              {cart.length > 0 && (
+                <span className="cart-badge">
+                  {cart.reduce((s, i) => s + i.cantidad, 0)}
+                </span>
+              )}
+            </button>
+          )}
         </div>
       </header>
 
@@ -177,33 +311,53 @@ export default function App() {
         </p>
       </section>
 
-      {/* Catálogo */}
-      <main style={{ flexGrow: 1 }}>
-        <div className="catalogo-header">
-          <h2 className="catalogo-title">🍭 Nuestras Creaciones Dulces</h2>
-          <div className="vibe-tags">
-            <span className="badge-pill badge-lime">🍬 Sweet AF</span>
-            <span className="badge-pill badge-pink">✨ Shine On</span>
-            <span className="badge-pill badge-cyan">🌀 Vibe Check</span>
-            <span className="badge-pill badge-yellow">⚡ Power Up</span>
+      {/* Vistas basadas en roles */}
+      {user?.rol === 'admin' ? (
+        <main style={{ flexGrow: 1, padding: '20px', background: 'var(--white)', borderRadius: 'var(--r-card)', border: 'var(--border-thick)' }}>
+          <h2 className="catalogo-title">🛡️ Panel de Control Administrador</h2>
+          <p style={{ marginTop: '10px' }}>Bienvenido al dashboard exclusivo para administradores.</p>
+          <AdminPanel productos={productos} setProductos={setProductos} token={localStorage.getItem('access_token')} />
+        </main>
+      ) : user?.rol === 'customer' ? (
+        <main style={{ flexGrow: 1, padding: '20px', background: 'var(--white)', borderRadius: 'var(--r-card)', border: 'var(--border-thick)', marginBottom: '20px' }}>
+          <h2 className="catalogo-title">🛍️ Panel del Cliente</h2>
+          <p style={{ marginTop: '10px' }}>Aquí puedes ver tu historial de pedidos, tus métodos de pago y gestionar tu cuenta.</p>
+        </main>
+      ) : null}
+
+      {/* Catálogo (Solo si no es admin) */}
+      {user?.rol !== 'admin' && (
+        <main style={{ flexGrow: 1 }}>
+          <div className="catalogo-header">
+            <h2 className="catalogo-title">🍭 Nuestras Creaciones Dulces</h2>
+            <div className="vibe-tags">
+              <span className="badge-pill badge-lime">🍬 Sweet AF</span>
+              <span className="badge-pill badge-pink">✨ Shine On</span>
+              <span className="badge-pill badge-cyan">🌀 Vibe Check</span>
+              <span className="badge-pill badge-yellow">⚡ Power Up</span>
+            </div>
           </div>
-        </div>
-        
-        {loading && <p className="loading-text">Cargando catálogo de delicias... 🍰</p>}
-        {error && <div className="error-box">⚠️ Error: {error}</div>}
-        
-        {!loading && !error && (
-          <div className="product-grid">
-            {productos.map((prod) => (
-              <ProductCard 
-                key={prod.id} 
-                producto={prod} 
-                onAddToCart={handleAddToCart}
-              />
-            ))}
-          </div>
-        )}
-      </main>
+          
+          {loading && (
+            <p className="loading-text">
+              {lento ? "Despertando el servidor, la primera visita puede tardar un minuto…" : "Cargando productos…"}
+            </p>
+          )}
+          {error && <div className="error-box">⚠️ Error: {error}</div>}
+          
+          {!loading && !error && (
+            <div className="product-grid">
+              {productos.map((prod) => (
+                <ProductCard 
+                  key={prod.id} 
+                  producto={prod} 
+                  onAddToCart={handleAddToCart}
+                />
+              ))}
+            </div>
+          )}
+        </main>
+      )}
 
       {/* Lateral: Carrito de Compras (Drawer) */}
       {isCartOpen && (
@@ -265,18 +419,7 @@ export default function App() {
             
             <form onSubmit={handleCheckoutSubmit}>
               <div className="form-group">
-                <label className="form-label">Nombre Completo</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Juan Pérez" 
-                  required 
-                  value={checkoutNombre}
-                  onChange={(e) => setCheckoutNombre(e.target.value)}
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Correo Electrónico (Obligatorio para recibir ticket)</label>
+                <label className="form-label">Correo Electrónico (Registrado en su cuenta)</label>
                 <input 
                   type="email" 
                   className="form-input" 
@@ -289,7 +432,13 @@ export default function App() {
 
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setIsCheckoutOpen(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary">Confirmar Compra</button>
+                <button type="submit" className="btn btn-primary" disabled={checkoutLoading}>
+                  {checkoutLoading ? (
+                    <>
+                      <span className="spinner"></span> Procesando...
+                    </>
+                  ) : 'Confirmar Compra'}
+                </button>
               </div>
             </form>
           </div>
@@ -311,8 +460,7 @@ export default function App() {
               </div>
               <div>Fecha: {compraExitosa.fecha}</div>
               <div>Código de Compra: <strong>{compraExitosa.codigoCompra}</strong></div>
-              <div>Cliente: {compraExitosa.cliente}</div>
-              <div>Email: {compraExitosa.email}</div>
+              <div>Email (Usuario): {compraExitosa.email}</div>
               <div>-------------------------------------</div>
               <div style={{ fontWeight: 'bold', margin: '4px 0' }}>Detalle de Productos:</div>
               {compraExitosa.items.map((item) => (
@@ -431,6 +579,132 @@ export default function App() {
                   <button className="btn btn-primary" onClick={cerrarModales}>Cerrar Ventana</button>
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Inicio de Sesión */}
+      {isLoginOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 className="modal-title">🔑 Iniciar Sesión</h3>
+            <p className="modal-description">Ingresa tus credenciales para acceder a tu cuenta.</p>
+            
+            <form onSubmit={handleLoginSubmit}>
+              {loginError && (
+                <p style={{ color: 'var(--danger)', fontSize: '13px', background: 'var(--danger-light)', padding: '8px', borderRadius: '4px', marginBottom: '12px' }}>
+                  {loginError}
+                </p>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">Email</label>
+                <input 
+                  type="email" 
+                  className="form-input" 
+                  placeholder="correo@ejemplo.com" 
+                  required
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Contraseña</label>
+                <input 
+                  type="password" 
+                  className="form-input" 
+                  placeholder="******" 
+                  required
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setIsLoginOpen(false)}>Cancelar</button>
+                <button type="submit" className="btn btn-primary" disabled={loginLoading}>
+                  {loginLoading ? <><span className="spinner"></span> Verificando...</> : 'Iniciar Sesión'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Registro */}
+      {isRegisterOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 className="modal-title">👤 Crear Cuenta</h3>
+            <p className="modal-description">Regístrese para poder realizar compras.</p>
+            
+            {regSuccess ? (
+               <div style={{ color: 'var(--success)', padding: '10px', fontWeight: 'bold' }}>
+                  {regSuccess}
+               </div>
+            ) : (
+               <form onSubmit={handleRegisterSubmit}>
+                 {regError && (
+                   <p style={{ color: 'var(--danger)', fontSize: '13px', background: 'var(--danger-light)', padding: '8px', borderRadius: '4px', marginBottom: '12px' }}>
+                     {regError}
+                   </p>
+                 )}
+
+                 <div className="form-group">
+                   <label className="form-label">Nombre</label>
+                   <input 
+                     type="text" 
+                     className="form-input" 
+                     placeholder="Tu nombre" 
+                     required
+                     value={regNombre}
+                     onChange={(e) => setRegNombre(e.target.value)}
+                   />
+                 </div>
+
+                 <div className="form-group">
+                   <label className="form-label">Email</label>
+                   <input 
+                     type="email" 
+                     className="form-input" 
+                     placeholder="correo@ejemplo.com" 
+                     required
+                     value={regEmail}
+                     onChange={(e) => setRegEmail(e.target.value)}
+                   />
+                 </div>
+
+                 <div className="form-group">
+                   <label className="form-label">Contraseña</label>
+                   <input 
+                     type="password" 
+                     className="form-input" 
+                     placeholder="******" 
+                     required
+                     value={regPassword}
+                     onChange={(e) => setRegPassword(e.target.value)}
+                   />
+                 </div>
+
+                 <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                   <input 
+                     type="checkbox" 
+                     id="consentimiento" 
+                     checked={regConsent}
+                     onChange={(e) => setRegConsent(e.target.checked)}
+                   />
+                   <label htmlFor="consentimiento" style={{ fontSize: '13px' }}>Acepto el tratamiento de mis datos personales según la Ley 25.326</label>
+                 </div>
+
+                 <div className="modal-actions">
+                   <button type="button" className="btn btn-secondary" onClick={() => setIsRegisterOpen(false)}>Cancelar</button>
+                   <button type="submit" className="btn btn-primary" disabled={!regConsent}>
+                     Crear Cuenta
+                   </button>
+                 </div>
+               </form>
             )}
           </div>
         </div>

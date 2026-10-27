@@ -9,6 +9,7 @@ from app.database import engine, Base, SessionLocal
 from app.models import Producto as ProductoModel
 from app.routers import productos
 from app.routers import auth
+from app.routers import pedidos
 
 # Crear las tablas en la base de datos si no existen
 Base.metadata.create_all(bind=engine)
@@ -46,6 +47,7 @@ app.add_middleware(
 # Montar los routers
 app.include_router(productos.router)
 app.include_router(auth.router)
+app.include_router(pedidos.router)
 
 
 # --- Endpoint de arrepentimiento (Resolución 424/2020) ---
@@ -55,24 +57,44 @@ class SolicitudArrepentimiento(BaseModel):
     codigo_compra: str
     detalle: str | None = None
 
-arrepentimientos_db = []
+from app.models import Pedido, ItemPedido
+from app.dependencies import get_db
+from sqlalchemy.orm import Session
+from fastapi import Depends, HTTPException
 
 @app.post("/arrepentimiento")
-def registrar_arrepentimiento(solicitud: SolicitudArrepentimiento):
+def registrar_arrepentimiento(solicitud: SolicitudArrepentimiento, db: Session = Depends(get_db)):
+    pedido = db.query(Pedido).filter(Pedido.codigo_compra == solicitud.codigo_compra).first()
+    
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado con ese código de compra.")
+    
+    # Check if email matches (security check)
+    if pedido.usuario.email != solicitud.email:
+        raise HTTPException(status_code=400, detail="El correo no coincide con el pedido.")
+
+    if pedido.estado == "CANCELADO":
+        raise HTTPException(status_code=400, detail="Este pedido ya se encuentra cancelado.")
+    
+    pedido.estado = "CANCELADO"
+    
+    for item in pedido.items:
+        producto = item.producto
+        if producto:
+            producto.stock += item.cantidad
+            
     codigo_tramite = f"REV-{datetime.now().year}-{uuid.uuid4().hex[:6].upper()}"
-    registro = {
-        "id": len(arrepentimientos_db) + 1,
-        "email": solicitud.email,
-        "codigo_compra": solicitud.codigo_compra,
-        "detalle": solicitud.detalle,
-        "codigo_tramite": codigo_tramite,
-        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    arrepentimientos_db.append(registro)
+    db.commit()
+    
     return {
         "mensaje": "Trámite de revocación de compra iniciado con éxito (Resolución 424/2020).",
         "codigo_tramite": codigo_tramite,
-        "registro": registro,
+        "registro": {
+            "email": solicitud.email,
+            "codigo_compra": solicitud.codigo_compra,
+            "codigo_tramite": codigo_tramite,
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
     }
 
 

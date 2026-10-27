@@ -57,3 +57,19 @@ def listar_productos(
         query = query.filter(ProductoModel.precio_final <= precio_max)
 
     return query.offset(skip).limit(limit).all()
+
+
+def actualizar_producto(
+    db: Session, producto_id: int, producto_update: schemas.ProductoUpdate
+) -> ProductoModel:
+    db_producto = db.query(ProductoModel).filter(ProductoModel.id == producto_id).first()
+    if not db_producto:
+        return None
+    
+    update_data = producto_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_producto, key, value)
+        
+    db.commit()
+    db.refresh(db_producto)
+    return db_producto

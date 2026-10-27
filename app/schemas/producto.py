@@ -9,6 +9,19 @@ class ProductoCreate(BaseModel):
     cuotas_valor: float
     garantia_meses: int
     stock: int
+    imagen_url: str | None = None
+    descripcion: str | None = None
+
+
+class ProductoUpdate(BaseModel):
+    nombre: str | None = None
+    precio_final: float | None = None
+    cuotas_cantidad: int | None = None
+    cuotas_valor: float | None = None
+    garantia_meses: int | None = None
+    stock: int | None = None
+    imagen_url: str | None = None
+    descripcion: str | None = None
 
 
 class ProductoOut(ProductoCreate):

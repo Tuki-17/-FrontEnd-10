@@ -26,6 +26,8 @@ class Producto(Base):
     cuotas_valor = Column(Float, nullable=False)
     garantia_meses = Column(Integer, nullable=False)
     stock = Column(Integer, nullable=False)
+    imagen_url = Column(String, nullable=True)
+    descripcion = Column(String, nullable=True)
 
     items = relationship("ItemPedido", back_populates="producto")
 
@@ -34,6 +36,7 @@ class Pedido(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    codigo_compra = Column(String, unique=True, index=True, nullable=False)
     estado = Column(String, default="pendiente")
     total = Column(Float, nullable=False)
 
